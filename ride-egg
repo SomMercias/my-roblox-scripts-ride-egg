@@ -386,6 +386,76 @@ local function snapshotActive()
 	return order, total, (folder ~= nil)
 end
 
+--=============================================================== warp / teleport
+-- Teleporting is a local movement action (sets HumanoidRootPart CFrame). It does
+-- NOT fire any remote. Whether the server keeps you there depends on its own
+-- movement validation (see the MOV-007 test in the main suite).
+S.warpHeight = 6      -- studs above the egg to land on
+S.warpHotkey = false  -- press G to warp to nearest egg
+
+-- Flat list of every currently-spawned egg (respecting the private filter).
+local function collectEggInstances()
+	local folder = getActiveEggsFolder()
+	local list = {}
+	if not folder then return list end
+	local root = myRoot()
+	local origin = root and root.Position
+	for _, child in ipairs(folder:GetChildren()) do
+		local name = child:GetAttribute("Egg")
+		if name and S.hidePrivate then
+			local priv = child:GetAttribute("PrivateTo")
+			if priv and priv ~= LocalPlayer.UserId then name = nil end
+		end
+		if name then
+			local pos = markerPosition(child)
+			if pos then
+				local dist = origin and (pos - origin).Magnitude or math.huge
+				table.insert(list, { inst = child, name = name, data = eggInfo(name), pos = pos, dist = dist })
+			end
+		end
+	end
+	return list
+end
+
+local function warpToPosition(pos)
+	local ch = LocalPlayer.Character
+	local root = ch and ch:FindFirstChild("HumanoidRootPart")
+	local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+	if not root then return false, "no character" end
+	if hum and hum.Sit then hum.Sit = false end          -- stand up if riding/seated
+	root.CFrame = CFrame.new(pos + Vector3.new(0, S.warpHeight, 0))
+	return true
+end
+
+-- Warp to the nearest egg (optionally of a specific type). Returns ok, entry|err.
+local function warpToNearest(filterName)
+	local best
+	for _, e in ipairs(collectEggInstances()) do
+		if (not filterName) or e.name == filterName then
+			if not best or e.dist < best.dist then best = e end
+		end
+	end
+	if not best then return false, "no matching egg spawned" end
+	local ok, err = warpToPosition(best.pos)
+	if not ok then return false, err end
+	return true, best
+end
+
+-- Warp to the rarest egg currently spawned (ties broken by nearest).
+local function warpToRarest()
+	local best, bestRank
+	for _, e in ipairs(collectEggInstances()) do
+		local rank = rarityRank(e.data and e.data.Rarity)
+		if (not best) or rank > bestRank or (rank == bestRank and e.dist < best.dist) then
+			best, bestRank = e, rank
+		end
+	end
+	if not best then return false, "no egg spawned" end
+	local ok, err = warpToPosition(best.pos)
+	if not ok then return false, err end
+	return true, best
+end
+
 --=============================================================== UI framework (inline)
 local function mk(class, props, parent)
 	local i = Instance.new(class)
@@ -418,6 +488,22 @@ local main = mk("Frame", {
 	AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COL.bg, BorderSizePixel = 0,
 }, gui)
 round(12, main); strokeit(COL.stroke, 1.5, main)
+
+-- Toast (transient feedback for warp actions etc.)
+local function notify(text, color)
+	local toast = mk("TextLabel", {
+		BackgroundColor3 = COL.panel, TextColor3 = COL.text, Font = Enum.Font.GothamMedium,
+		TextSize = 13, Text = "  " .. text, TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.fromOffset(300, 36), Position = UDim2.new(0.5, -150, 0, -46),
+		AnchorPoint = Vector2.new(0, 0), BorderSizePixel = 0, ZIndex = 50,
+	}, main)
+	round(8, toast); strokeit(color or COL.accent, 1.5, toast)
+	TweenService:Create(toast, TweenInfo.new(0.2), { Position = UDim2.new(0.5, -150, 0, 8) }):Play()
+	task.delay(2.2, function()
+		local t = TweenService:Create(toast, TweenInfo.new(0.2), { Position = UDim2.new(0.5, -150, 0, -46) })
+		t:Play(); t.Completed:Wait(); toast:Destroy()
+	end)
+end
 
 -- Header
 local header = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, main)
@@ -478,30 +564,39 @@ local pageIndex = makeTab("Egg Index")
 local pageSet   = makeTab("ESP Settings")
 
 --=============================================================== row builders
-local function eggRow(parent, order, name, rarity, right1, right2)
+local function eggRow(parent, order, name, rarity, right1, right2, warpCb)
 	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 42), BorderSizePixel = 0, LayoutOrder = order }, parent)
 	round(7, card); strokeit(COL.stroke, 1, card)
 	mk("Frame", { BackgroundColor3 = rarityColor(rarity), Size = UDim2.new(0, 4, 1, -10), Position = UDim2.fromOffset(4, 5), BorderSizePixel = 0 }, card)
+	local rightInset = warpCb and 46 or 12   -- leave room for the warp button
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 4), Size = UDim2.new(0.55, 0, 0, 18),
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 4), Size = UDim2.new(0.5, 0, 0, 18),
 		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text,
 		TextXAlignment = Enum.TextXAlignment.Left, Text = name, TextTruncate = Enum.TextTruncate.AtEnd,
 	}, card)
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 22), Size = UDim2.new(0.55, 0, 0, 14),
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 22), Size = UDim2.new(0.5, 0, 0, 14),
 		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = rarityColor(rarity),
 		TextXAlignment = Enum.TextXAlignment.Left, Text = rarity,
 	}, card)
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 4), Size = UDim2.new(0.45, -12, 0, 18),
+		BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, 4), Size = UDim2.new(0.5, -rightInset, 0, 18),
 		Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = COL.text,
 		TextXAlignment = Enum.TextXAlignment.Right, Text = right1 or "",
 	}, card)
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 22), Size = UDim2.new(0.45, -12, 0, 14),
+		BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, 22), Size = UDim2.new(0.5, -rightInset, 0, 14),
 		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub,
 		TextXAlignment = Enum.TextXAlignment.Right, Text = right2 or "",
 	}, card)
+	if warpCb then
+		local wb = mk("TextButton", {
+			Text = "⚡", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = COL.text,
+			BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(32, 32),
+			Position = UDim2.new(1, -38, 0.5, -16), BorderSizePixel = 0, AutoButtonColor = true,
+		}, card); round(6, wb)
+		wb.MouseButton1Click:Connect(function() task.spawn(warpCb) end)
+	end
 	return card
 end
 
@@ -512,10 +607,31 @@ local liveHeader = mk("TextLabel", {
 	Text = "Scanning…", LayoutOrder = 0,
 }, pageLive)
 
+-- Persistent warp controls (not rebuilt on refresh)
+local liveControls = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 34), LayoutOrder = 1 }, pageLive)
+mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, liveControls)
+local function ctrlButton(text, cb)
+	local b = mk("TextButton", {
+		Text = text, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text,
+		BackgroundColor3 = COL.accent, Size = UDim2.new(0.5, -3, 1, 0), BorderSizePixel = 0, AutoButtonColor = true,
+	}, liveControls); round(6, b)
+	b.MouseButton1Click:Connect(function() task.spawn(cb) end)
+end
+ctrlButton("⚡ Warp Nearest", function()
+	local ok, res = warpToNearest()
+	if ok then notify("Warped to nearest: " .. res.name, rarityColor(res.data and res.data.Rarity))
+	else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
+end)
+ctrlButton("⭐ Warp Rarest", function()
+	local ok, res = warpToRarest()
+	if ok then notify("Warped to rarest: " .. res.name, rarityColor(res.data and res.data.Rarity))
+	else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
+end)
+
 local function refreshLive()
-	-- clear old rows + empty-state label (keep header + layout)
+	-- clear old rows + empty-state label (keep header, controls + layout)
 	for _, c in ipairs(pageLive:GetChildren()) do
-		if c ~= liveHeader and not c:IsA("UIListLayout") then c:Destroy() end
+		if c ~= liveHeader and c ~= liveControls and not c:IsA("UIListLayout") then c:Destroy() end
 	end
 	local order, total, ok = snapshotActive()
 	if not ok then
@@ -528,10 +644,14 @@ local function refreshLive()
 		local price = g.price and ("$" .. formatBig(g.price)) or "$?"
 		local luck = g.luck and ("Luck " .. formatBig(g.luck)) or ""
 		local near = (g.nearest ~= math.huge) and string.format(" · %.0fst", g.nearest) or ""
-		eggRow(pageLive, i, g.name, g.rarity, right1 .. "  " .. price, luck .. near)
+		eggRow(pageLive, i + 1, g.name, g.rarity, right1 .. "  " .. price, luck .. near, function()
+			local wok, wres = warpToNearest(g.name)
+			if wok then notify("Warped to " .. g.name, rarityColor(g.rarity))
+			else notify("Warp failed: " .. tostring(wres), Color3.fromRGB(230, 85, 85)) end
+		end)
 	end
 	if total == 0 then
-		mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 40), LayoutOrder = 1,
+		mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 40), LayoutOrder = 2,
 			Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = COL.sub, Text = "No eggs currently spawned in the map." }, pageLive)
 	end
 end
@@ -626,9 +746,15 @@ settingButton(7, function() return "Min rarity: " .. (RARITY_NAMES[S.minRarity] 
 	reconcile()
 end)
 settingSlider(8, "Max ESP distance", 0, 5000, "maxDistance", "st")
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 34), LayoutOrder = 9, Font = Enum.Font.Gotham,
+
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 9, Font = Enum.Font.GothamBold,
+	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "WARP" }, pageSet)
+settingSlider(10, "Warp height (studs above egg)", 0, 25, "warpHeight", "st")
+settingToggle(11, "Warp hotkey (G = nearest egg)", "warpHotkey")
+
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 44), LayoutOrder = 12, Font = Enum.Font.Gotham,
 	TextSize = 11, TextColor3 = COL.sub, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "This tool is read-only: it never fires remotes or changes the game. It only reads ActiveEggs + GameData.Eggs and draws overlays." }, pageSet)
+	Text = "ESP is read-only. Warp moves your character locally (it does not fire remotes); the server may snap you back if it validates movement. Use on a private/authorised server." }, pageSet)
 
 --=============================================================== dragging
 do
@@ -678,6 +804,10 @@ table.insert(conns, UserInputService.InputBegan:Connect(function(i, gpe)
 	if i.KeyCode == Enum.KeyCode.RightAlt then
 		main.Visible = not main.Visible
 		pill.Visible = not main.Visible
+	elseif i.KeyCode == Enum.KeyCode.G and S.warpHotkey then
+		local ok, res = warpToNearest()
+		if ok then notify("Warped to nearest: " .. res.name, rarityColor(res.data and res.data.Rarity))
+		else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
 	end
 end))
 
