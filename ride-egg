@@ -11,19 +11,21 @@
     • WARP: teleport to the nearest / rarest egg, or per egg-type.
     • HOME: teleport back to your own plot — including automatically the moment
       you pick up (hold) an egg, so you can drop it straight into a nest.
+    • NOCLIP: walk through walls (clears collision on your own character only).
 
-  The ESP/info part is READ-ONLY (never fires a remote). The WARP/HOME part
-  moves YOUR OWN character locally (sets CFrame / PivotTo) — it still fires no
-  remotes, but the server may snap you back if it validates movement. Use on a
-  private/authorised server.
+  The ESP/info part is READ-ONLY (never fires a remote). The WARP/HOME/NOCLIP
+  part moves / affects ONLY YOUR OWN character locally (CFrame / PivotTo /
+  CanCollide) — it still fires no remotes, but the server may snap you back or
+  block you if it validates movement/collision. Use on a private/authorised
+  server.
 
   --------------------------------------------------------------------------
   HOW TO RUN (executor):
       loadstring(readfile("TestScript/EggESP.lua"))()
   or just paste the whole file into your executor and run it.
 
-  KEYS:  Right-Alt = show/hide window · G = warp to nearest egg (if enabled)
-         H = warp home (if enabled).  Buttons exist for all actions too.
+  KEYS:  Right-Alt = show/hide window · G = warp to nearest egg · H = warp home
+         · N = toggle noclip  (G/H/N must be enabled in Settings first).
 
   DATA SOURCES (auto-detected, all read-only):
     • ReplicatedStorage.GameData.Eggs                → egg stats (rarity/price/luck…)
@@ -530,6 +532,35 @@ local function warpHome()
 	return true, plot
 end
 
+--=============================================================== noclip (local movement)
+-- Client-side only: clears collision on the local character's own parts so you
+-- can walk through walls. Fires no remotes and affects only your own character.
+S.noclip = false
+S.noclipHotkey = false
+local noclipConn
+local noclipOriginals = {}   -- [part] = original CanCollide, to restore on disable
+local function enableNoclip()
+	if noclipConn then return end
+	noclipConn = RunService.Stepped:Connect(function()
+		if not S.noclip then return end
+		local ch = LocalPlayer.Character
+		if not ch then return end
+		for _, p in ipairs(ch:GetDescendants()) do
+			if p:IsA("BasePart") and p.CanCollide then
+				if noclipOriginals[p] == nil then noclipOriginals[p] = true end
+				p.CanCollide = false
+			end
+		end
+	end)
+end
+local function disableNoclip()
+	if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
+	for p, orig in pairs(noclipOriginals) do
+		if typeof(p) == "Instance" and p.Parent then pcall(function() p.CanCollide = orig end) end
+	end
+	noclipOriginals = {}
+end
+
 --=============================================================== UI framework (inline)
 local function mk(class, props, parent)
 	local i = Instance.new(class)
@@ -920,9 +951,15 @@ sectionLabel(12, "Home")
 settingToggle(13, "Auto-warp home while holding an egg", "autoHome")
 settingToggle(14, "Home hotkey (H = warp home)", "homeHotkey")
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -2, 0, 56), LayoutOrder = 15, Font = Enum.Font.Gotham,
+sectionLabel(15, "Movement")
+settingToggle(16, "Noclip (walk through walls)", "noclip", function(on)
+	if on then enableNoclip() else disableNoclip() end
+end)
+settingToggle(17, "Noclip hotkey (N)", "noclipHotkey")
+
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -2, 0, 68), LayoutOrder = 18, Font = Enum.Font.Gotham,
 	TextSize = 11, TextColor3 = COL.sub, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "ESP is read-only. Warp/Home move your character locally (they do not fire remotes); the server may snap you back if it validates movement. 'Auto-warp home while holding an egg' teleports you to your plot the moment you pick an egg up. Use on a private/authorised server." }, pageSet)
+	Text = "ESP is read-only. Warp/Home/Noclip move only your own character locally (they fire no remotes); the server may snap you back or block you if it validates movement/collision. Use on a private/authorised server." }, pageSet)
 
 --=============================================================== dragging
 do
@@ -959,6 +996,7 @@ local conns = {}
 local function stop()
 	running = false
 	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+	disableNoclip()
 	clearAllEsp()
 	pcall(function() espFolder:Destroy() end)
 	pcall(function() gui:Destroy() end)
@@ -966,6 +1004,9 @@ local function stop()
 end
 _G.__EggESP_Stop = stop
 btnClose.MouseButton1Click:Connect(stop)
+
+-- Reset noclip bookkeeping on respawn (the loop re-applies to the new body).
+table.insert(conns, LocalPlayer.CharacterAdded:Connect(function() noclipOriginals = {} end))
 
 table.insert(conns, UserInputService.InputBegan:Connect(function(i, gpe)
 	if gpe then return end
@@ -980,6 +1021,10 @@ table.insert(conns, UserInputService.InputBegan:Connect(function(i, gpe)
 		local ok, res = warpHome()
 		if ok then notify("🏠 Warped home", Color3.fromRGB(70, 150, 255))
 		else notify("Home failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
+	elseif i.KeyCode == Enum.KeyCode.N and S.noclipHotkey then
+		S.noclip = not S.noclip
+		if S.noclip then enableNoclip() else disableNoclip() end
+		notify(S.noclip and "Noclip ON" or "Noclip OFF", S.noclip and COL.accent or COL.sub)
 	end
 end))
 
