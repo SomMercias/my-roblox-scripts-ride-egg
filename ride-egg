@@ -1,0 +1,715 @@
+--[[
+================================================================================
+  EggESP.lua  —  Ride A Pet · Egg Scanner + Info + ESP   (STANDALONE)
+================================================================================
+  A self-contained client tool that:
+    • Lists every egg CURRENTLY SPAWNING in the map (live), with its
+      rarity, sell price, luck, growth time, weight, mutation and distance.
+    • Shows a full Egg Index (all eggs in the game with their stats).
+    • Draws ESP over each active egg: a through-wall billboard (name / rarity /
+      $price / luck / distance) and an optional coloured marker dot.
+
+  This is a READ-ONLY / VISUAL tool. It does not fire any RemoteEvent, buy,
+  hatch, move or change anything on the server — it only reads data the client
+  already has and draws overlays locally. Safe to run anywhere you can play.
+
+  --------------------------------------------------------------------------
+  HOW TO RUN (executor):
+      loadstring(readfile("TestScript/EggESP.lua"))()
+  or just paste the whole file into your executor and run it.
+  Toggle the window with the RIGHT-ALT key, or the floating pill button.
+
+  DATA SOURCES (auto-detected, all read-only):
+    • ReplicatedStorage.GameData.Eggs                → egg stats (rarity/price/luck…)
+    • (ServerData|ReplicatedStorage).ActiveEggs      → live spawned-egg markers
+        each child has attributes: Egg, Position, Weight, Mutation, PrivateTo …
+================================================================================
+--]]
+
+--=============================================================== services
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local CoreGui           = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = workspace.CurrentCamera
+
+--=============================================================== clean up previous run
+pcall(function()
+	local old = (gethui and gethui() or CoreGui):FindFirstChild("RideAPetEggESP")
+	if old then old:Destroy() end
+end)
+if _G.__EggESP_Stop then pcall(_G.__EggESP_Stop) end
+
+--=============================================================== rarity config
+local RARITY_ORDER = {
+	Common = 1, Uncommon = 2, Rare = 3, Epic = 4,
+	Legendary = 5, Mythic = 6, Mythical = 6, Divine = 7, Ethereal = 8,
+}
+local RARITY_COLOR = {
+	Common    = Color3.fromRGB(200, 200, 210),
+	Uncommon  = Color3.fromRGB(120, 220, 130),
+	Rare      = Color3.fromRGB(70, 150, 255),
+	Epic      = Color3.fromRGB(175, 95, 240),
+	Legendary = Color3.fromRGB(255, 190, 60),
+	Mythic    = Color3.fromRGB(255, 80, 120),
+	Divine    = Color3.fromRGB(90, 230, 230),
+	Ethereal  = Color3.fromRGB(255, 120, 255),
+}
+local function rarityColor(r) return RARITY_COLOR[r] or Color3.fromRGB(220, 220, 220) end
+local function rarityRank(r)  return RARITY_ORDER[r] or 0 end
+
+--=============================================================== egg database
+-- Primary: require the live module. Fallback: embedded snapshot (from the dump)
+-- so the tool still works if the module path changes.
+local EGG_FALLBACK = {
+	["White Egg"]={Rarity="Common",GrowthTime=3,SellPrice=5,Luck=1},
+	["Brown Egg"]={Rarity="Common",GrowthTime=3,SellPrice=5,Luck=5},
+	["Cracked Egg"]={Rarity="Rare",GrowthTime=3,SellPrice=5,Luck=30},
+	["Easter Egg"]={Rarity="Rare",GrowthTime=5,SellPrice=51,Luck=50},
+	["Stone Egg"]={Rarity="Rare",GrowthTime=7,SellPrice=5,Luck=100},
+	["Leaf Egg"]={Rarity="Rare",GrowthTime=8,SellPrice=5,Luck=200},
+	["Mushroom Egg"]={Rarity="Epic",GrowthTime=60,SellPrice=5,Luck=500},
+	["Flower Egg"]={Rarity="Epic",GrowthTime=180,SellPrice=5,Luck=750},
+	["Slime Egg"]={Rarity="Epic",GrowthTime=180,SellPrice=5,Luck=1000},
+	["Ice Egg"]={Rarity="Epic",GrowthTime=180,SellPrice=5,Luck=3000},
+	["Glass Egg"]={Rarity="Legendary",GrowthTime=300,SellPrice=5,Luck=10000},
+	["Golden Egg"]={Rarity="Legendary",GrowthTime=300,SellPrice=5,Luck=30000},
+	["Diamond Egg"]={Rarity="Mythic",GrowthTime=600,SellPrice=5,Luck=90000},
+	["Crystal Egg"]={Rarity="Mythic",GrowthTime=900,SellPrice=5,Luck=150000},
+	["Skull Egg"]={Rarity="Mythic",GrowthTime=3600,SellPrice=5,Luck=250000,AppearChance=50},
+	["Asteroid Egg"]={Rarity="Mythic",GrowthTime=7200,SellPrice=5,Luck=500000,AppearChance=25},
+	["Dominus Egg"]={Rarity="Mythic",GrowthTime=7200,SellPrice=5,Luck=700000,AppearChance=7},
+	["Flaming Egg"]={Rarity="Mythic",GrowthTime=7200,SellPrice=5,Luck=1000000,AppearChance=20},
+	["Sinister Egg"]={Rarity="Mythic",GrowthTime=7200,SellPrice=5,Luck=3000000,AppearChance=10},
+	["Soul Egg"]={Rarity="Mythic",GrowthTime=7200,SellPrice=5,Luck=7000000,AppearChance=10},
+	["Tidal Egg"]={Rarity="Mythic",GrowthTime=7200,Luck=8000000,SpawnType="Island"},
+	["Aurora Egg"]={Rarity="Divine",GrowthTime=10800,SellPrice=3,Luck=300000000,AppearChance=5},
+	["Galaxy Egg"]={Rarity="Divine",GrowthTime=10800,SellPrice=5,Luck=1500000000,AppearChance=3},
+	["Bloom Egg"]={Rarity="Divine",GrowthTime=10800,Luck=2000000000,SpawnType="Island"},
+	["Blackhole Egg"]={Rarity="Ethereal",GrowthTime=21600,SellPrice=5,Luck=100000000000,AppearChance=1},
+	["Solaris Egg"]={Rarity="Ethereal",GrowthTime=25200,SellPrice=5,Luck=300000000000,AppearChance=1},
+	["Cherub Egg"]={Rarity="Ethereal",GrowthTime=28800,SellPrice=700000,Luck=1000000000000,AppearChance=0.1},
+	["Volcanic Egg"]={Rarity="Ethereal",GrowthTime=43200,SellPrice=700000,Luck=2500000000000,AppearChance=0.06,RequiresVolcano=true},
+	["Dragon Egg"]={Rarity="Ethereal",GrowthTime=0,SellPrice=0,Premium=true},
+	["Giant Egg"]={Rarity="Ethereal",GrowthTime=0,SellPrice=0,Premium=true},
+}
+
+local EggData = EGG_FALLBACK
+pcall(function()
+	local gd = ReplicatedStorage:FindFirstChild("GameData")
+	local mod = gd and gd:FindFirstChild("Eggs")
+	if mod and mod:IsA("ModuleScript") then
+		local ok, live = pcall(require, mod)
+		if ok and type(live) == "table" and next(live) then
+			EggData = live
+		end
+	end
+end)
+
+local function eggInfo(name)
+	return EggData[name] or EGG_FALLBACK[name]
+end
+
+--=============================================================== ActiveEggs source
+local function getActiveEggsFolder()
+	local sd = ReplicatedStorage:FindFirstChild("ServerData")
+	local f = (sd and sd:FindFirstChild("ActiveEggs")) or ReplicatedStorage:FindFirstChild("ActiveEggs")
+	return f
+end
+
+--=============================================================== formatting helpers
+local function formatBig(n)
+	if type(n) ~= "number" then return tostring(n) end
+	if n == 0 then return "0" end
+	local units = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No" }
+	local i = 1
+	local v = n
+	while math.abs(v) >= 1000 and i < #units do v = v / 1000; i += 1 end
+	if i == 1 then return tostring(math.floor(v + 0.5)) end
+	return string.format("%.2f%s", v, units[i])
+end
+
+local function formatTime(sec)
+	sec = tonumber(sec) or 0
+	if sec <= 0 then return "—" end
+	if sec < 60 then return sec .. "s" end
+	if sec < 3600 then return string.format("%dm %ds", sec // 60, sec % 60) end
+	local h = sec // 3600
+	return string.format("%dh %dm", h, (sec % 3600) // 60)
+end
+
+local function myRoot()
+	local ch = LocalPlayer.Character
+	return ch and ch:FindFirstChild("HumanoidRootPart")
+end
+
+--=============================================================== settings (state)
+local S = {
+	espEnabled     = true,
+	showNames      = true,
+	showStats      = true,   -- price + luck line
+	showDistance   = true,
+	showMarker     = false,  -- neon dot at egg position
+	hidePrivate    = true,   -- hide eggs privately assigned to other players
+	minRarity      = 1,      -- Common
+	maxDistance    = 0,      -- 0 = unlimited (studs)
+}
+local RARITY_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Divine", "Ethereal" }
+
+--=============================================================== ESP engine
+local espFolder = Instance.new("Folder")
+espFolder.Name = "\0EggESP_World"
+espFolder.Parent = workspace
+
+local espObjects = {}  -- [activeEggChild] = { part=, billboard=, name=, data= }
+
+local function destroyEsp(child)
+	local o = espObjects[child]
+	if o then
+		pcall(function() o.part:Destroy() end)
+		espObjects[child] = nil
+	end
+end
+
+local function clearAllEsp()
+	for child in pairs(espObjects) do destroyEsp(child) end
+end
+
+-- Build the billboard/marker for one active egg marker instance.
+local function buildEsp(child, name, data, pos)
+	local col = rarityColor(data and data.Rarity)
+
+	local part = Instance.new("Part")
+	part.Name = "EggMarker"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Size = Vector3.new(0.6, 0.6, 0.6)
+	part.Shape = Enum.PartType.Ball
+	part.Material = Enum.Material.Neon
+	part.Color = col
+	part.Transparency = S.showMarker and 0.35 or 1
+	part.CFrame = CFrame.new(pos)
+	part.Parent = espFolder
+
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "EggBB"
+	bb.Adornee = part
+	bb.AlwaysOnTop = true
+	bb.LightInfluence = 0
+	bb.Size = UDim2.fromOffset(190, 58)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, 2.2, 0)
+	bb.MaxDistance = (S.maxDistance > 0) and S.maxDistance or 1e9
+	bb.Parent = part
+
+	local holder = Instance.new("Frame")
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.fromScale(1, 1)
+	holder.Parent = bb
+	local list = Instance.new("UIListLayout")
+	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = holder
+
+	local nameLbl = Instance.new("TextLabel")
+	nameLbl.Name = "Name"
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Size = UDim2.new(1, 0, 0, 18)
+	nameLbl.Font = Enum.Font.GothamBold
+	nameLbl.TextSize = 15
+	nameLbl.TextColor3 = col
+	nameLbl.TextStrokeTransparency = 0.4
+	nameLbl.Text = name
+	nameLbl.LayoutOrder = 1
+	nameLbl.Parent = holder
+
+	local statLbl = Instance.new("TextLabel")
+	statLbl.Name = "Stat"
+	statLbl.BackgroundTransparency = 1
+	statLbl.Size = UDim2.new(1, 0, 0, 14)
+	statLbl.Font = Enum.Font.GothamMedium
+	statLbl.TextSize = 12
+	statLbl.TextColor3 = Color3.fromRGB(235, 235, 240)
+	statLbl.TextStrokeTransparency = 0.5
+	statLbl.LayoutOrder = 2
+	statLbl.Parent = holder
+
+	local distLbl = Instance.new("TextLabel")
+	distLbl.Name = "Dist"
+	distLbl.BackgroundTransparency = 1
+	distLbl.Size = UDim2.new(1, 0, 0, 13)
+	distLbl.Font = Enum.Font.Gotham
+	distLbl.TextSize = 11
+	distLbl.TextColor3 = Color3.fromRGB(180, 180, 190)
+	distLbl.TextStrokeTransparency = 0.5
+	distLbl.LayoutOrder = 3
+	distLbl.Parent = holder
+
+	espObjects[child] = {
+		part = part, bb = bb, name = name, data = data,
+		nameLbl = nameLbl, statLbl = statLbl, distLbl = distLbl, color = col,
+	}
+	return espObjects[child]
+end
+
+-- Should this egg be shown given filters?
+local function passesFilter(name, data, child)
+	if not data then return true end -- unknown egg: show anyway
+	if rarityRank(data.Rarity) < S.minRarity then return false end
+	if S.hidePrivate then
+		local priv = child:GetAttribute("PrivateTo")
+		if priv and priv ~= LocalPlayer.UserId then return false end
+	end
+	return true
+end
+
+-- Read the world position for a marker (attribute first, fall back to part).
+local function markerPosition(child)
+	local p = child:GetAttribute("Position")
+	if typeof(p) == "Vector3" then return p end
+	if child:IsA("BasePart") then return child.Position end
+	if child:IsA("Model") and child.PrimaryPart then return child.PrimaryPart.Position end
+	local cf = child:GetAttribute("SpawnCFrame")
+	if typeof(cf) == "CFrame" then return cf.Position end
+	return nil
+end
+
+-- Reconcile ESP objects against the current ActiveEggs children.
+local function reconcile()
+	local folder = getActiveEggsFolder()
+	if not folder then clearAllEsp() return end
+
+	local seen = {}
+	for _, child in ipairs(folder:GetChildren()) do
+		local name = child:GetAttribute("Egg")
+		if name then
+			seen[child] = true
+			local data = eggInfo(name)
+			local pos = markerPosition(child)
+			local show = S.espEnabled and pos and passesFilter(name, data, child)
+			if show then
+				local o = espObjects[child]
+				if not o then o = buildEsp(child, name, data, pos) end
+				o.part.CFrame = CFrame.new(pos)
+			else
+				destroyEsp(child)
+			end
+		end
+	end
+	-- remove ESP for markers that no longer exist / filtered out
+	for child in pairs(espObjects) do
+		if not seen[child] then destroyEsp(child) end
+	end
+end
+
+-- Per-frame: update distance text + label visibility, throttled.
+local lastUpd = 0
+local function onRender()
+	if not S.espEnabled then return end
+	local now = os.clock()
+	if now - lastUpd < 0.1 then return end
+	lastUpd = now
+	local root = myRoot()
+	local cam = workspace.CurrentCamera
+	local origin = (root and root.Position) or (cam and cam.CFrame.Position)
+	for child, o in pairs(espObjects) do
+		if o.part and o.part.Parent then
+			local dist = origin and (o.part.Position - origin).Magnitude or 0
+			o.nameLbl.Visible = S.showNames
+			o.statLbl.Visible = S.showStats
+			o.distLbl.Visible = S.showDistance
+			o.part.Transparency = S.showMarker and 0.35 or 1
+			if S.showStats then
+				local d = o.data or {}
+				local mut = child:GetAttribute("Mutation") or child:GetAttribute("SpawnMutation")
+				local price = d.SellPrice and ("$" .. formatBig(d.SellPrice)) or "$?"
+				local luck = d.Luck and ("· Luck " .. formatBig(d.Luck)) or ""
+				o.statLbl.Text = (d.Rarity or "?") .. " · " .. price .. " " .. luck
+					.. (mut and ("  ⟡" .. tostring(mut)) or "")
+			end
+			if S.showDistance then
+				o.distLbl.Text = string.format("%.0f studs", dist)
+			end
+			-- distance cull
+			local visible = (S.maxDistance == 0) or (dist <= S.maxDistance)
+			o.bb.Enabled = visible
+		end
+	end
+end
+
+--=============================================================== live snapshot for UI
+-- Returns grouped list: { {name, rarity, count, price, luck, growth, nearest} , ... }
+local function snapshotActive()
+	local folder = getActiveEggsFolder()
+	local groups, order = {}, {}
+	local total = 0
+	local root = myRoot()
+	local origin = root and root.Position
+	if folder then
+		for _, child in ipairs(folder:GetChildren()) do
+			local name = child:GetAttribute("Egg")
+			if name then
+				if S.hidePrivate then
+					local priv = child:GetAttribute("PrivateTo")
+					if priv and priv ~= LocalPlayer.UserId then name = nil end
+				end
+			end
+			if name then
+				total += 1
+				local g = groups[name]
+				if not g then
+					local d = eggInfo(name) or {}
+					g = { name = name, rarity = d.Rarity or "?", price = d.SellPrice,
+						luck = d.Luck, growth = d.GrowthTime, count = 0, nearest = math.huge }
+					groups[name] = g
+					table.insert(order, g)
+				end
+				g.count += 1
+				local pos = markerPosition(child)
+				if pos and origin then
+					local dd = (pos - origin).Magnitude
+					if dd < g.nearest then g.nearest = dd end
+				end
+			end
+		end
+	end
+	table.sort(order, function(a, b)
+		local ra, rb = rarityRank(a.rarity), rarityRank(b.rarity)
+		if ra ~= rb then return ra > rb end       -- rarest first
+		return (a.luck or 0) > (b.luck or 0)
+	end)
+	return order, total, (folder ~= nil)
+end
+
+--=============================================================== UI framework (inline)
+local function mk(class, props, parent)
+	local i = Instance.new(class)
+	for k, v in pairs(props or {}) do i[k] = v end
+	if parent then i.Parent = parent end
+	return i
+end
+local function round(px, p) mk("UICorner", { CornerRadius = UDim.new(0, px) }, p) end
+local function strokeit(c, t, p) mk("UIStroke", { Color = c, Thickness = t or 1 }, p) end
+
+local COL = {
+	bg = Color3.fromRGB(22, 22, 28), panel = Color3.fromRGB(30, 30, 38),
+	card = Color3.fromRGB(38, 38, 48), cardH = Color3.fromRGB(48, 48, 60),
+	accent = Color3.fromRGB(233, 84, 32), text = Color3.fromRGB(235, 235, 240),
+	sub = Color3.fromRGB(160, 160, 172), stroke = Color3.fromRGB(60, 60, 74),
+}
+
+local gui = mk("ScreenGui", {
+	Name = "RideAPetEggESP", ResetOnSpawn = false, DisplayOrder = 10000,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true,
+})
+pcall(function()
+	if syn and syn.protect_gui then syn.protect_gui(gui) end
+	gui.Parent = (gethui and gethui()) or CoreGui
+end)
+if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local main = mk("Frame", {
+	Size = UDim2.fromOffset(580, 430), Position = UDim2.fromScale(0.5, 0.5),
+	AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COL.bg, BorderSizePixel = 0,
+}, gui)
+round(12, main); strokeit(COL.stroke, 1.5, main)
+
+-- Header
+local header = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, main)
+round(12, header)
+mk("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, header)
+mk("TextLabel", {
+	BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 4), Size = UDim2.new(1, -120, 0, 20),
+	Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = COL.text,
+	TextXAlignment = Enum.TextXAlignment.Left, Text = "🥚 Ride A Pet — Egg Scanner & ESP",
+}, header)
+local subTitle = mk("TextLabel", {
+	BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 24), Size = UDim2.new(1, -120, 0, 14),
+	Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub,
+	TextXAlignment = Enum.TextXAlignment.Left, Text = "read-only · loading…",
+}, header)
+local btnClose = mk("TextButton", {
+	Text = "✕", Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = COL.text,
+	BackgroundColor3 = Color3.fromRGB(150, 54, 20), Size = UDim2.fromOffset(28, 28),
+	Position = UDim2.new(1, -36, 0, 8), BorderSizePixel = 0,
+}, header); round(6, btnClose)
+local btnMin = mk("TextButton", {
+	Text = "–", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = COL.text,
+	BackgroundColor3 = COL.card, Size = UDim2.fromOffset(28, 28),
+	Position = UDim2.new(1, -68, 0, 8), BorderSizePixel = 0,
+}, header); round(6, btnMin)
+
+-- Tabs bar
+local tabBar = mk("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 50), Size = UDim2.new(1, -20, 0, 30) }, main)
+mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, tabBar)
+
+-- Content
+local content = mk("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 86), Size = UDim2.new(1, -20, 1, -96) }, main)
+
+local pages, tabButtons = {}, {}
+local function makeTab(name)
+	local btn = mk("TextButton", {
+		Text = name, Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.sub,
+		BackgroundColor3 = COL.card, Size = UDim2.fromOffset(130, 30), BorderSizePixel = 0, AutoButtonColor = false,
+	}, tabBar); round(6, btn)
+	local page = mk("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1),
+		ScrollBarThickness = 4, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+	}, content)
+	mk("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+	pages[name] = page; tabButtons[name] = btn
+	btn.MouseButton1Click:Connect(function()
+		for n, p in pairs(pages) do
+			p.Visible = (n == name)
+			tabButtons[n].BackgroundColor3 = (n == name) and COL.accent or COL.card
+			tabButtons[n].TextColor3 = (n == name) and COL.text or COL.sub
+		end
+	end)
+	return page
+end
+
+local pageLive  = makeTab("Live Map")
+local pageIndex = makeTab("Egg Index")
+local pageSet   = makeTab("ESP Settings")
+
+--=============================================================== row builders
+local function eggRow(parent, order, name, rarity, right1, right2)
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 42), BorderSizePixel = 0, LayoutOrder = order }, parent)
+	round(7, card); strokeit(COL.stroke, 1, card)
+	mk("Frame", { BackgroundColor3 = rarityColor(rarity), Size = UDim2.new(0, 4, 1, -10), Position = UDim2.fromOffset(4, 5), BorderSizePixel = 0 }, card)
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 4), Size = UDim2.new(0.55, 0, 0, 18),
+		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text,
+		TextXAlignment = Enum.TextXAlignment.Left, Text = name, TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 22), Size = UDim2.new(0.55, 0, 0, 14),
+		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = rarityColor(rarity),
+		TextXAlignment = Enum.TextXAlignment.Left, Text = rarity,
+	}, card)
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 4), Size = UDim2.new(0.45, -12, 0, 18),
+		Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = COL.text,
+		TextXAlignment = Enum.TextXAlignment.Right, Text = right1 or "",
+	}, card)
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 22), Size = UDim2.new(0.45, -12, 0, 14),
+		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub,
+		TextXAlignment = Enum.TextXAlignment.Right, Text = right2 or "",
+	}, card)
+	return card
+end
+
+--=============================================================== Live Map page
+local liveHeader = mk("TextLabel", {
+	BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 22), Font = Enum.Font.GothamBold,
+	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "Scanning…", LayoutOrder = 0,
+}, pageLive)
+
+local function refreshLive()
+	-- clear old rows + empty-state label (keep header + layout)
+	for _, c in ipairs(pageLive:GetChildren()) do
+		if c ~= liveHeader and not c:IsA("UIListLayout") then c:Destroy() end
+	end
+	local order, total, ok = snapshotActive()
+	if not ok then
+		liveHeader.Text = "⚠ ActiveEggs folder not found (are you in-game?)"
+		return
+	end
+	liveHeader.Text = string.format("🥚 %d eggs live · %d types  (sorted rarest first)", total, #order)
+	for i, g in ipairs(order) do
+		local right1 = "x" .. g.count
+		local price = g.price and ("$" .. formatBig(g.price)) or "$?"
+		local luck = g.luck and ("Luck " .. formatBig(g.luck)) or ""
+		local near = (g.nearest ~= math.huge) and string.format(" · %.0fst", g.nearest) or ""
+		eggRow(pageLive, i, g.name, g.rarity, right1 .. "  " .. price, luck .. near)
+	end
+	if total == 0 then
+		mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 40), LayoutOrder = 1,
+			Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = COL.sub, Text = "No eggs currently spawned in the map." }, pageLive)
+	end
+end
+
+--=============================================================== Egg Index page
+local function buildIndex()
+	local order = {}
+	for name, d in pairs(EggData) do table.insert(order, { name = name, d = d }) end
+	table.sort(order, function(a, b)
+		local ra, rb = rarityRank(a.d.Rarity), rarityRank(b.d.Rarity)
+		if ra ~= rb then return ra > rb end
+		return (a.d.Luck or 0) > (b.d.Luck or 0)
+	end)
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 22), Font = Enum.Font.GothamBold,
+		TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = "📖 Egg Index — " .. #order .. " eggs (rarest first)", LayoutOrder = 0,
+	}, pageIndex)
+	for i, e in ipairs(order) do
+		local d = e.d
+		local price = d.SellPrice and ("$" .. formatBig(d.SellPrice)) or (d.Premium and "Premium" or "$?")
+		local luck = d.Luck and ("Luck " .. formatBig(d.Luck)) or ""
+		local growth = "⏱ " .. formatTime(d.GrowthTime)
+		local chance = d.AppearChance and (" · " .. tostring(d.AppearChance) .. "%") or ""
+		eggRow(pageIndex, i, e.name, d.Rarity or "?", price .. "  " .. growth, luck .. chance)
+	end
+end
+
+--=============================================================== Settings page
+local function settingToggle(order, label, key, onChange)
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 38), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(7, card)
+	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -70, 1, 0),
+		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = label }, card)
+	local bg = mk("Frame", { BackgroundColor3 = S[key] and COL.accent or COL.stroke, Size = UDim2.fromOffset(42, 22),
+		Position = UDim2.new(1, -54, 0.5, -11), BorderSizePixel = 0 }, card); round(11, bg)
+	local knob = mk("Frame", { BackgroundColor3 = COL.text, Size = UDim2.fromOffset(18, 18),
+		Position = S[key] and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2), BorderSizePixel = 0 }, bg); round(9, knob)
+	local btn = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1) }, card)
+	btn.MouseButton1Click:Connect(function()
+		S[key] = not S[key]
+		TweenService:Create(knob, TweenInfo.new(0.15), { Position = S[key] and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2) }):Play()
+		TweenService:Create(bg, TweenInfo.new(0.15), { BackgroundColor3 = S[key] and COL.accent or COL.stroke }):Play()
+		if onChange then onChange(S[key]) end
+	end)
+end
+
+local function settingButton(order, getLabel, onClick)
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 38), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(7, card)
+	local lbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -24, 1, 0),
+		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = getLabel() }, card)
+	local btn = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1) }, card)
+	btn.MouseButton1Click:Connect(function() onClick(); lbl.Text = getLabel() end)
+	return lbl
+end
+
+local function settingSlider(order, label, min, max, key, suffix)
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 50), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(7, card)
+	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 18),
+		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = label }, card)
+	local valLbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 18),
+		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Right,
+		Text = (S[key] == 0 and "∞" or (S[key] .. (suffix or ""))) }, card)
+	local bar = mk("Frame", { BackgroundColor3 = COL.stroke, Position = UDim2.new(0, 12, 0, 34), Size = UDim2.new(1, -24, 0, 6), BorderSizePixel = 0 }, card); round(3, bar)
+	local fill = mk("Frame", { BackgroundColor3 = COL.accent, Size = UDim2.fromScale((S[key] - min) / (max - min), 1), BorderSizePixel = 0 }, bar); round(3, fill)
+	local dragging = false
+	local function setX(x)
+		local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+		local v = math.floor(min + (max - min) * rel + 0.5)
+		S[key] = v
+		fill.Size = UDim2.fromScale(rel, 1)
+		valLbl.Text = (v == 0 and "∞" or (v .. (suffix or "")))
+		reconcile()
+	end
+	bar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; setX(i.Position.X) end end)
+	UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then setX(i.Position.X) end end)
+	UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
+end
+
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 0, Font = Enum.Font.GothamBold,
+	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "ESP" }, pageSet)
+settingToggle(1, "ESP enabled", "espEnabled", function() reconcile() end)
+settingToggle(2, "Show egg name", "showNames")
+settingToggle(3, "Show rarity / price / luck", "showStats")
+settingToggle(4, "Show distance", "showDistance")
+settingToggle(5, "Show marker dot", "showMarker", function() reconcile() end)
+settingToggle(6, "Hide other players' private eggs", "hidePrivate", function() reconcile() refreshLive() end)
+settingButton(7, function() return "Min rarity: " .. (RARITY_NAMES[S.minRarity] or "?") .. "  ▸" end, function()
+	S.minRarity = (S.minRarity % #RARITY_NAMES) + 1
+	reconcile()
+end)
+settingSlider(8, "Max ESP distance", 0, 5000, "maxDistance", "st")
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 34), LayoutOrder = 9, Font = Enum.Font.Gotham,
+	TextSize = 11, TextColor3 = COL.sub, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "This tool is read-only: it never fires remotes or changes the game. It only reads ActiveEggs + GameData.Eggs and draws overlays." }, pageSet)
+
+--=============================================================== dragging
+do
+	local dragging, dragStart, startPos
+	header.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; dragStart = i.Position; startPos = main.Position
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - dragStart
+			main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+	end)
+end
+
+--=============================================================== minimise / close / keybind
+local pill = mk("TextButton", {
+	Text = "🥚 Eggs", Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text,
+	BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(88, 32), Position = UDim2.fromOffset(20, 120),
+	Visible = false, BorderSizePixel = 0,
+}, gui); round(8, pill)
+btnMin.MouseButton1Click:Connect(function() main.Visible = false; pill.Visible = true end)
+pill.MouseButton1Click:Connect(function() main.Visible = true; pill.Visible = false end)
+
+--=============================================================== lifecycle
+local running = true
+local conns = {}
+
+local function stop()
+	running = false
+	for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+	clearAllEsp()
+	pcall(function() espFolder:Destroy() end)
+	pcall(function() gui:Destroy() end)
+	_G.__EggESP_Stop = nil
+end
+_G.__EggESP_Stop = stop
+btnClose.MouseButton1Click:Connect(stop)
+
+table.insert(conns, UserInputService.InputBegan:Connect(function(i, gpe)
+	if gpe then return end
+	if i.KeyCode == Enum.KeyCode.RightAlt then
+		main.Visible = not main.Visible
+		pill.Visible = not main.Visible
+	end
+end))
+
+table.insert(conns, RunService.RenderStepped:Connect(onRender))
+
+-- Watch ActiveEggs for add/remove so ESP + list stay live.
+local function hookFolder()
+	local f = getActiveEggsFolder()
+	if not f then return end
+	table.insert(conns, f.ChildAdded:Connect(function() task.defer(reconcile) end))
+	table.insert(conns, f.ChildRemoved:Connect(function(child) destroyEsp(child) end))
+end
+hookFolder()
+
+-- Periodic reconcile + live list refresh.
+task.spawn(function()
+	while running do
+		pcall(reconcile)
+		pcall(refreshLive)
+		local f = getActiveEggsFolder()
+		subTitle.Text = f and ("read-only · source: " .. f:GetFullName()) or "read-only · waiting for ActiveEggs…"
+		task.wait(1)
+	end
+end)
+
+-- Build static pages once.
+buildIndex()
+refreshLive()
+-- default tab
+tabButtons["Live Map"].BackgroundColor3 = COL.accent
+tabButtons["Live Map"].TextColor3 = COL.text
+pageLive.Visible = true
+
+print("[EggESP] Loaded. Eggs in DB: " .. (function() local n=0 for _ in pairs(EggData) do n+=1 end return n end)()
+	.. " | Toggle window with Right-Alt.")
