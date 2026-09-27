@@ -8,16 +8,22 @@
     • Shows a full Egg Index (all eggs in the game with their stats).
     • Draws ESP over each active egg: a through-wall billboard (name / rarity /
       $price / luck / distance) and an optional coloured marker dot.
+    • WARP: teleport to the nearest / rarest egg, or per egg-type.
+    • HOME: teleport back to your own plot — including automatically the moment
+      you pick up (hold) an egg, so you can drop it straight into a nest.
 
-  This is a READ-ONLY / VISUAL tool. It does not fire any RemoteEvent, buy,
-  hatch, move or change anything on the server — it only reads data the client
-  already has and draws overlays locally. Safe to run anywhere you can play.
+  The ESP/info part is READ-ONLY (never fires a remote). The WARP/HOME part
+  moves YOUR OWN character locally (sets CFrame / PivotTo) — it still fires no
+  remotes, but the server may snap you back if it validates movement. Use on a
+  private/authorised server.
 
   --------------------------------------------------------------------------
   HOW TO RUN (executor):
       loadstring(readfile("TestScript/EggESP.lua"))()
   or just paste the whole file into your executor and run it.
-  Toggle the window with the RIGHT-ALT key, or the floating pill button.
+
+  KEYS:  Right-Alt = show/hide window · G = warp to nearest egg (if enabled)
+         H = warp home (if enabled).  Buttons exist for all actions too.
 
   DATA SOURCES (auto-detected, all read-only):
     • ReplicatedStorage.GameData.Eggs                → egg stats (rarity/price/luck…)
@@ -456,6 +462,74 @@ local function warpToRarest()
 	return true, best
 end
 
+--=============================================================== warp home / held egg
+S.autoHome   = false   -- auto-warp home as soon as you pick up (hold) an egg
+S.homeHotkey = false   -- press H to warp home
+
+-- Is the local character currently holding an egg (equipped Tool)?
+-- Returns the tool + egg display name, or nil.
+local function heldEggTool()
+	local ch = LocalPlayer.Character
+	if not ch then return nil end
+	for _, t in ipairs(ch:GetChildren()) do
+		if t:IsA("Tool") then
+			local eggName = t:GetAttribute("Egg")
+			local isEgg = (eggName ~= nil)
+				or (t:GetAttribute("EggKey") ~= nil)
+				or (t.HasTag and t:HasTag("Egg"))
+				or (EggData[t.Name] ~= nil)
+			if isEgg then
+				return t, (eggName or t.Name)
+			end
+		end
+	end
+	return nil
+end
+
+-- Locate the local player's own plot (uses the game's own service, then falls
+-- back to scanning workspace.Plots by owner attribute / Owner ObjectValue).
+local function findMyPlot()
+	local gs = ReplicatedStorage:FindFirstChild("GameServices")
+	local genMod = gs and gs:FindFirstChild("General")
+	if genMod and genMod:IsA("ModuleScript") then
+		local ok, gen = pcall(require, genMod)
+		if ok and type(gen) == "table" and gen.GetPlot then
+			local ok2, plot = pcall(function() return gen:GetPlot(LocalPlayer) end)
+			if ok2 and typeof(plot) == "Instance" then return plot end
+		end
+	end
+	local plots = workspace:FindFirstChild("Plots")
+	if not plots then return nil end
+	for _, plot in ipairs(plots:GetChildren()) do
+		if plot:GetAttribute("OwnerUserId") == LocalPlayer.UserId then return plot end
+		local data = plot:FindFirstChild("Data")
+		local owner = (data and data:FindFirstChild("Owner")) or plot:FindFirstChild("Owner")
+		if owner and owner:IsA("ObjectValue") and owner.Value == LocalPlayer then return plot end
+	end
+	return nil
+end
+
+-- CFrame just above the home baseplate.
+local function getHomeCFrame()
+	local plot = findMyPlot()
+	if not plot then return nil, nil end
+	local base = plot:FindFirstChild("Baseplate") or plot:FindFirstChildWhichIsA("BasePart")
+	if not base then return nil, plot end
+	return base.CFrame * CFrame.new(0, S.warpHeight, 0), plot
+end
+
+-- Warp the whole character (keeps the held egg) home. Returns ok, plot|err.
+local function warpHome()
+	local ch = LocalPlayer.Character
+	if not ch then return false, "no character" end
+	local cf, plot = getHomeCFrame()
+	if not cf then return false, "home plot not found" end
+	local hum = ch:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Sit then hum.Sit = false end
+	ch:PivotTo(cf)                       -- PivotTo moves the character + held tool
+	return true, plot
+end
+
 --=============================================================== UI framework (inline)
 local function mk(class, props, parent)
 	local i = Instance.new(class)
@@ -610,22 +684,31 @@ local liveHeader = mk("TextLabel", {
 -- Persistent warp controls (not rebuilt on refresh)
 local liveControls = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 34), LayoutOrder = 1 }, pageLive)
 mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, liveControls)
-local function ctrlButton(text, cb)
+local function ctrlButton(text, color, cb)
 	local b = mk("TextButton", {
 		Text = text, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text,
-		BackgroundColor3 = COL.accent, Size = UDim2.new(0.5, -3, 1, 0), BorderSizePixel = 0, AutoButtonColor = true,
+		BackgroundColor3 = color or COL.accent, Size = UDim2.new(1/3, -4, 1, 0), BorderSizePixel = 0, AutoButtonColor = true,
 	}, liveControls); round(6, b)
 	b.MouseButton1Click:Connect(function() task.spawn(cb) end)
 end
-ctrlButton("⚡ Warp Nearest", function()
+ctrlButton("⚡ Nearest", COL.accent, function()
 	local ok, res = warpToNearest()
 	if ok then notify("Warped to nearest: " .. res.name, rarityColor(res.data and res.data.Rarity))
 	else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
 end)
-ctrlButton("⭐ Warp Rarest", function()
+ctrlButton("⭐ Rarest", COL.accent, function()
 	local ok, res = warpToRarest()
 	if ok then notify("Warped to rarest: " .. res.name, rarityColor(res.data and res.data.Rarity))
 	else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
+end)
+ctrlButton("🏠 Home", Color3.fromRGB(70, 150, 255), function()
+	local _, eggName = heldEggTool()
+	local ok, res = warpHome()
+	if ok then
+		notify(eggName and ("🏠 Home — holding " .. eggName) or "🏠 Warped home", Color3.fromRGB(70, 150, 255))
+	else
+		notify("Home failed: " .. tostring(res), Color3.fromRGB(230, 85, 85))
+	end
 end)
 
 local function refreshLive()
@@ -749,12 +832,17 @@ settingSlider(8, "Max ESP distance", 0, 5000, "maxDistance", "st")
 
 mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 9, Font = Enum.Font.GothamBold,
 	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "WARP" }, pageSet)
-settingSlider(10, "Warp height (studs above egg)", 0, 25, "warpHeight", "st")
+settingSlider(10, "Warp height (studs above egg/home)", 0, 25, "warpHeight", "st")
 settingToggle(11, "Warp hotkey (G = nearest egg)", "warpHotkey")
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 44), LayoutOrder = 12, Font = Enum.Font.Gotham,
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 12, Font = Enum.Font.GothamBold,
+	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "HOME" }, pageSet)
+settingToggle(13, "Auto-warp home while holding an egg", "autoHome")
+settingToggle(14, "Home hotkey (H = warp home)", "homeHotkey")
+
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 56), LayoutOrder = 15, Font = Enum.Font.Gotham,
 	TextSize = 11, TextColor3 = COL.sub, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "ESP is read-only. Warp moves your character locally (it does not fire remotes); the server may snap you back if it validates movement. Use on a private/authorised server." }, pageSet)
+	Text = "ESP is read-only. Warp/Home move your character locally (they do not fire remotes); the server may snap you back if it validates movement. 'Auto-warp home while holding an egg' teleports you to your plot the moment you pick an egg up. Use on a private/authorised server." }, pageSet)
 
 --=============================================================== dragging
 do
@@ -808,6 +896,10 @@ table.insert(conns, UserInputService.InputBegan:Connect(function(i, gpe)
 		local ok, res = warpToNearest()
 		if ok then notify("Warped to nearest: " .. res.name, rarityColor(res.data and res.data.Rarity))
 		else notify("Warp failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
+	elseif i.KeyCode == Enum.KeyCode.H and S.homeHotkey then
+		local ok, res = warpHome()
+		if ok then notify("🏠 Warped home", Color3.fromRGB(70, 150, 255))
+		else notify("Home failed: " .. tostring(res), Color3.fromRGB(230, 85, 85)) end
 	end
 end))
 
@@ -830,6 +922,25 @@ task.spawn(function()
 		local f = getActiveEggsFolder()
 		subTitle.Text = f and ("read-only · source: " .. f:GetFullName()) or "read-only · waiting for ActiveEggs…"
 		task.wait(1)
+	end
+end)
+
+-- Auto-warp home while holding an egg (fires once per pickup, 2s cooldown).
+task.spawn(function()
+	local wasHolding, lastWarp = false, 0
+	while running do
+		if S.autoHome then
+			local holding = heldEggTool() ~= nil
+			if holding and not wasHolding and (os.clock() - lastWarp) > 2 then
+				lastWarp = os.clock()
+				local ok = warpHome()
+				if ok then notify("🏠 Auto-home (holding egg)", Color3.fromRGB(70, 150, 255)) end
+			end
+			wasHolding = holding
+		else
+			wasHolding = false
+		end
+		task.wait(0.25)
 	end
 end)
 
