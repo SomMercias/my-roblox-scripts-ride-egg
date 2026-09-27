@@ -541,11 +541,40 @@ local function round(px, p) mk("UICorner", { CornerRadius = UDim.new(0, px) }, p
 local function strokeit(c, t, p) mk("UIStroke", { Color = c, Thickness = t or 1 }, p) end
 
 local COL = {
-	bg = Color3.fromRGB(22, 22, 28), panel = Color3.fromRGB(30, 30, 38),
-	card = Color3.fromRGB(38, 38, 48), cardH = Color3.fromRGB(48, 48, 60),
-	accent = Color3.fromRGB(233, 84, 32), text = Color3.fromRGB(235, 235, 240),
-	sub = Color3.fromRGB(160, 160, 172), stroke = Color3.fromRGB(60, 60, 74),
+	bg      = Color3.fromRGB(20, 20, 27),   bg2    = Color3.fromRGB(13, 13, 18),
+	panel   = Color3.fromRGB(31, 32, 42),   panel2 = Color3.fromRGB(23, 24, 32),
+	card    = Color3.fromRGB(37, 38, 50),   cardH  = Color3.fromRGB(49, 51, 66),
+	accent  = Color3.fromRGB(255, 126, 64), accent2= Color3.fromRGB(230, 78, 30),
+	text    = Color3.fromRGB(239, 240, 246), sub   = Color3.fromRGB(150, 152, 168),
+	stroke  = Color3.fromRGB(56, 58, 74),   strokeL= Color3.fromRGB(78, 80, 100),
+	blue    = Color3.fromRGB(84, 158, 255), blue2  = Color3.fromRGB(46, 112, 214),
+	good    = Color3.fromRGB(90, 210, 140), bad   = Color3.fromRGB(235, 92, 92),
 }
+
+-- add a two-stop UIGradient to any element
+local function gradient(parent, c1, c2, rot)
+	return mk("UIGradient", { Color = ColorSequence.new(c1, c2), Rotation = rot or 90 }, parent)
+end
+-- soft coloured outline used as a subtle glow
+local function glow(parent, color, thick, transp)
+	return mk("UIStroke", { Color = color, Thickness = thick or 1.4, Transparency = transp or 0.15 }, parent)
+end
+local function pad(parent, l, r, t, b)
+	return mk("UIPadding", {
+		PaddingLeft = UDim.new(0, l or 0), PaddingRight = UDim.new(0, r or 0),
+		PaddingTop = UDim.new(0, t or 0), PaddingBottom = UDim.new(0, b or 0),
+	}, parent)
+end
+-- 9-slice soft drop shadow behind a frame
+local function shadow(parent)
+	local s = mk("ImageLabel", {
+		Name = "Shadow", BackgroundTransparency = 1, Image = "rbxassetid://5028857084",
+		ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 0.35,
+		ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(24, 24, 276, 276),
+		Size = UDim2.new(1, 60, 1, 60), Position = UDim2.new(0, -30, 0, -26), ZIndex = 0,
+	}, parent)
+	return s
+end
 
 local gui = mk("ScreenGui", {
 	Name = "RideAPetEggESP", ResetOnSpawn = false, DisplayOrder = 10000,
@@ -558,10 +587,12 @@ end)
 if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local main = mk("Frame", {
-	Size = UDim2.fromOffset(580, 430), Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(600, 448), Position = UDim2.fromScale(0.5, 0.5),
 	AnchorPoint = Vector2.new(0.5, 0.5), BackgroundColor3 = COL.bg, BorderSizePixel = 0,
 }, gui)
-round(12, main); strokeit(COL.stroke, 1.5, main)
+round(14, main); strokeit(COL.stroke, 1.5, main)
+gradient(main, COL.bg, COL.bg2, 90)
+shadow(main)
 
 -- Toast (transient feedback for warp actions etc.)
 local function notify(text, color)
@@ -580,56 +611,73 @@ local function notify(text, color)
 end
 
 -- Header
-local header = mk("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, main)
-round(12, header)
-mk("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = COL.panel, BorderSizePixel = 0 }, header)
+local header = mk("Frame", { Size = UDim2.new(1, 0, 0, 52), BackgroundColor3 = COL.panel, BorderSizePixel = 0, ZIndex = 2 }, main)
+round(14, header); gradient(header, COL.panel, COL.panel2, 90)
+mk("Frame", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14), BackgroundColor3 = COL.panel2, BorderSizePixel = 0, ZIndex = 2 }, header)
+mk("Frame", { Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, 1, -2), BackgroundColor3 = COL.accent, BorderSizePixel = 0, ZIndex = 3 }, header)
+
+-- logo badge
+local badge = mk("Frame", { Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(12, 9), BackgroundColor3 = COL.accent, BorderSizePixel = 0, ZIndex = 3 }, header)
+round(9, badge); gradient(badge, COL.accent, COL.accent2, 90); glow(badge, COL.accent, 1.2, 0.35)
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Font = Enum.Font.GothamBold, TextSize = 18, Text = "🥚", ZIndex = 4 }, badge)
+
 mk("TextLabel", {
-	BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 4), Size = UDim2.new(1, -120, 0, 20),
-	Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = COL.text,
-	TextXAlignment = Enum.TextXAlignment.Left, Text = "🥚 Ride A Pet — Egg Scanner & ESP",
+	BackgroundTransparency = 1, Position = UDim2.fromOffset(56, 8), Size = UDim2.new(1, -170, 0, 20),
+	Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = COL.text, ZIndex = 3,
+	TextXAlignment = Enum.TextXAlignment.Left, Text = "Ride A Pet · Egg Scanner",
 }, header)
 local subTitle = mk("TextLabel", {
-	BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 24), Size = UDim2.new(1, -120, 0, 14),
-	Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub,
+	BackgroundTransparency = 1, Position = UDim2.fromOffset(56, 28), Size = UDim2.new(1, -170, 0, 14),
+	Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub, ZIndex = 3,
 	TextXAlignment = Enum.TextXAlignment.Left, Text = "read-only · loading…",
 }, header)
-local btnClose = mk("TextButton", {
-	Text = "✕", Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = COL.text,
-	BackgroundColor3 = Color3.fromRGB(150, 54, 20), Size = UDim2.fromOffset(28, 28),
-	Position = UDim2.new(1, -36, 0, 8), BorderSizePixel = 0,
-}, header); round(6, btnClose)
-local btnMin = mk("TextButton", {
-	Text = "–", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = COL.text,
-	BackgroundColor3 = COL.card, Size = UDim2.fromOffset(28, 28),
-	Position = UDim2.new(1, -68, 0, 8), BorderSizePixel = 0,
-}, header); round(6, btnMin)
 
--- Tabs bar
-local tabBar = mk("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 50), Size = UDim2.new(1, -20, 0, 30) }, main)
-mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, tabBar)
+local function circleBtn(txt, xoff, col)
+	local b = mk("TextButton", {
+		Text = txt, Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = COL.text,
+		BackgroundColor3 = col, Size = UDim2.fromOffset(30, 30), Position = UDim2.new(1, xoff, 0, 11),
+		BorderSizePixel = 0, AutoButtonColor = true, ZIndex = 3,
+	}, header); round(15, b); return b
+end
+local btnClose = circleBtn("✕", -40, Color3.fromRGB(196, 62, 52))
+local btnMin   = circleBtn("–", -76, COL.card)
+
+-- Tabs bar (segmented pill control)
+local tabBar = mk("Frame", { BackgroundColor3 = COL.panel2, Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 34), BorderSizePixel = 0 }, main)
+round(9, tabBar); strokeit(COL.stroke, 1, tabBar); pad(tabBar, 4, 4, 4, 4)
+mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Left }, tabBar)
 
 -- Content
-local content = mk("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 86), Size = UDim2.new(1, -20, 1, -96) }, main)
+local content = mk("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 104), Size = UDim2.new(1, -24, 1, -114) }, main)
 
-local pages, tabButtons = {}, {}
+local pages, tabButtons, tabGrads = {}, {}, {}
+local function selectTab(name)
+	for n, p in pairs(pages) do
+		local on = (n == name)
+		p.Visible = on
+		tabButtons[n].BackgroundTransparency = on and 0 or 1
+		tabButtons[n].TextColor3 = on and COL.text or COL.sub
+		tabGrads[n].grad.Enabled = on
+		tabGrads[n].glow.Transparency = on and 0.25 or 1
+	end
+end
 local function makeTab(name)
 	local btn = mk("TextButton", {
-		Text = name, Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.sub,
-		BackgroundColor3 = COL.card, Size = UDim2.fromOffset(130, 30), BorderSizePixel = 0, AutoButtonColor = false,
-	}, tabBar); round(6, btn)
+		Text = name, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.sub,
+		BackgroundColor3 = COL.accent, BackgroundTransparency = 1,
+		Size = UDim2.new(1/3, -6, 1, 0), BorderSizePixel = 0, AutoButtonColor = false,
+	}, tabBar); round(7, btn)
+	local grad = gradient(btn, COL.accent, COL.accent2, 90); grad.Enabled = false
+	local gl = glow(btn, COL.accent, 1.2, 1)
+	tabGrads[name] = { grad = grad, glow = gl }
 	local page = mk("ScrollingFrame", {
 		BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1),
-		ScrollBarThickness = 4, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+		ScrollBarThickness = 3, ScrollBarImageColor3 = COL.strokeL,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
 	}, content)
-	mk("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, page)
+	mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, page)
 	pages[name] = page; tabButtons[name] = btn
-	btn.MouseButton1Click:Connect(function()
-		for n, p in pairs(pages) do
-			p.Visible = (n == name)
-			tabButtons[n].BackgroundColor3 = (n == name) and COL.accent or COL.card
-			tabButtons[n].TextColor3 = (n == name) and COL.text or COL.sub
-		end
-	end)
+	btn.MouseButton1Click:Connect(function() selectTab(name) end)
 	return page
 end
 
@@ -639,56 +687,79 @@ local pageSet   = makeTab("ESP Settings")
 
 --=============================================================== row builders
 local function eggRow(parent, order, name, rarity, right1, right2, warpCb)
-	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 42), BorderSizePixel = 0, LayoutOrder = order }, parent)
-	round(7, card); strokeit(COL.stroke, 1, card)
-	mk("Frame", { BackgroundColor3 = rarityColor(rarity), Size = UDim2.new(0, 4, 1, -10), Position = UDim2.fromOffset(4, 5), BorderSizePixel = 0 }, card)
-	local rightInset = warpCb and 46 or 12   -- leave room for the warp button
+	local rc = rarityColor(rarity)
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -2, 0, 48), BorderSizePixel = 0, LayoutOrder = order }, parent)
+	round(10, card); strokeit(COL.stroke, 1, card)
+	-- rarity stripe
+	local stripe = mk("Frame", { BackgroundColor3 = rc, Size = UDim2.new(0, 4, 1, -14), Position = UDim2.fromOffset(7, 7), BorderSizePixel = 0 }, card)
+	round(2, stripe); gradient(stripe, rc, rc:Lerp(Color3.new(), 0.45), 90); glow(stripe, rc, 1, 0.35)
+	local rightInset = warpCb and 46 or 12
+	-- egg name
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 4), Size = UDim2.new(0.5, 0, 0, 18),
-		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text,
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(20, 6), Size = UDim2.new(0.55, -20, 0, 18),
+		Font = Enum.Font.GothamBold, TextSize = 13.5, TextColor3 = COL.text,
 		TextXAlignment = Enum.TextXAlignment.Left, Text = name, TextTruncate = Enum.TextTruncate.AtEnd,
 	}, card)
-	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.fromOffset(16, 22), Size = UDim2.new(0.5, 0, 0, 14),
-		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = rarityColor(rarity),
-		TextXAlignment = Enum.TextXAlignment.Left, Text = rarity,
+	-- rarity pill chip
+	local pill = mk("Frame", {
+		BackgroundColor3 = rc, BackgroundTransparency = 0.8, Position = UDim2.fromOffset(20, 27),
+		Size = UDim2.fromOffset(0, 16), AutomaticSize = Enum.AutomaticSize.X, BorderSizePixel = 0,
 	}, card)
+	round(6, pill); strokeit(rc, 1, pill); pad(pill, 7, 7, 0, 0)
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, 4), Size = UDim2.new(0.5, -rightInset, 0, 18),
-		Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = COL.text,
+		BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.X, Size = UDim2.new(0, 0, 1, 0),
+		Font = Enum.Font.GothamBold, TextSize = 10.5, TextColor3 = rc, Text = string.upper(rarity),
+	}, pill)
+	-- right values
+	mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 6), Size = UDim2.new(0.45, -rightInset, 0, 18),
+		Font = Enum.Font.GothamBold, TextSize = 12.5, TextColor3 = COL.text,
 		TextXAlignment = Enum.TextXAlignment.Right, Text = right1 or "",
 	}, card)
 	mk("TextLabel", {
-		BackgroundTransparency = 1, Position = UDim2.new(0.5, 0, 0, 22), Size = UDim2.new(0.5, -rightInset, 0, 14),
+		BackgroundTransparency = 1, Position = UDim2.new(0.55, 0, 0, 27), Size = UDim2.new(0.45, -rightInset, 0, 14),
 		Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = COL.sub,
 		TextXAlignment = Enum.TextXAlignment.Right, Text = right2 or "",
 	}, card)
+	-- hover highlight
+	card.MouseEnter:Connect(function() TweenService:Create(card, TweenInfo.new(0.12), { BackgroundColor3 = COL.cardH }):Play() end)
+	card.MouseLeave:Connect(function() TweenService:Create(card, TweenInfo.new(0.12), { BackgroundColor3 = COL.card }):Play() end)
 	if warpCb then
 		local wb = mk("TextButton", {
 			Text = "⚡", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = COL.text,
 			BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(32, 32),
 			Position = UDim2.new(1, -38, 0.5, -16), BorderSizePixel = 0, AutoButtonColor = true,
-		}, card); round(6, wb)
+		}, card); round(8, wb); gradient(wb, COL.accent, COL.accent2, 90); glow(wb, COL.accent, 1.1, 0.4)
 		wb.MouseButton1Click:Connect(function() task.spawn(warpCb) end)
 	end
 	return card
 end
 
+-- A styled banner label (used as the header of a page)
+local function banner(parent, order, text)
+	local bar = mk("Frame", { BackgroundColor3 = COL.panel2, Size = UDim2.new(1, -2, 0, 30), BorderSizePixel = 0, LayoutOrder = order }, parent)
+	round(8, bar); strokeit(COL.stroke, 1, bar)
+	mk("Frame", { BackgroundColor3 = COL.accent, Size = UDim2.new(0, 4, 1, -12), Position = UDim2.fromOffset(8, 6), BorderSizePixel = 0 }, bar)
+	local lbl = mk("TextLabel", {
+		BackgroundTransparency = 1, Position = UDim2.fromOffset(18, 0), Size = UDim2.new(1, -26, 1, 0),
+		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = text,
+	}, bar)
+	return lbl, bar
+end
+
 --=============================================================== Live Map page
-local liveHeader = mk("TextLabel", {
-	BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 22), Font = Enum.Font.GothamBold,
-	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "Scanning…", LayoutOrder = 0,
-}, pageLive)
+local liveHeader, liveBanner = banner(pageLive, 0, "Scanning…")
 
 -- Persistent warp controls (not rebuilt on refresh)
-local liveControls = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 34), LayoutOrder = 1 }, pageLive)
+local liveControls = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -2, 0, 36), LayoutOrder = 1 }, pageLive)
 mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, liveControls)
 local function ctrlButton(text, color, cb)
+	color = color or COL.accent
 	local b = mk("TextButton", {
-		Text = text, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.text,
-		BackgroundColor3 = color or COL.accent, Size = UDim2.new(1/3, -4, 1, 0), BorderSizePixel = 0, AutoButtonColor = true,
-	}, liveControls); round(6, b)
+		Text = text, Font = Enum.Font.GothamBold, TextSize = 12.5, TextColor3 = COL.text,
+		BackgroundColor3 = color, Size = UDim2.new(1/3, -4, 1, 0), BorderSizePixel = 0, AutoButtonColor = true,
+	}, liveControls); round(8, b)
+	gradient(b, color, color:Lerp(Color3.new(), 0.32), 90); glow(b, color, 1.1, 0.4)
 	b.MouseButton1Click:Connect(function() task.spawn(cb) end)
 end
 ctrlButton("⚡ Nearest", COL.accent, function()
@@ -712,9 +783,9 @@ ctrlButton("🏠 Home", Color3.fromRGB(70, 150, 255), function()
 end)
 
 local function refreshLive()
-	-- clear old rows + empty-state label (keep header, controls + layout)
+	-- clear old rows + empty-state label (keep banner, controls + layout)
 	for _, c in ipairs(pageLive:GetChildren()) do
-		if c ~= liveHeader and c ~= liveControls and not c:IsA("UIListLayout") then c:Destroy() end
+		if c ~= liveBanner and c ~= liveControls and not c:IsA("UIListLayout") then c:Destroy() end
 	end
 	local order, total, ok = snapshotActive()
 	if not ok then
@@ -748,11 +819,7 @@ local function buildIndex()
 		if ra ~= rb then return ra > rb end
 		return (a.d.Luck or 0) > (b.d.Luck or 0)
 	end)
-	mk("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 22), Font = Enum.Font.GothamBold,
-		TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "📖 Egg Index — " .. #order .. " eggs (rarest first)", LayoutOrder = 0,
-	}, pageIndex)
+	banner(pageIndex, 0, "📖 Egg Index — " .. #order .. " eggs (rarest first)")
 	for i, e in ipairs(order) do
 		local d = e.d
 		local price = d.SellPrice and ("$" .. formatBig(d.SellPrice)) or (d.Premium and "Premium" or "$?")
@@ -764,50 +831,66 @@ local function buildIndex()
 end
 
 --=============================================================== Settings page
+local function sectionLabel(order, text)
+	local f = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -2, 0, 22), LayoutOrder = order }, pageSet)
+	mk("Frame", { BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(3, 12), Position = UDim2.fromOffset(2, 6), BorderSizePixel = 0 }, f)
+	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -12, 1, 0),
+		Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = string.upper(text) }, f)
+end
+
 local function settingToggle(order, label, key, onChange)
-	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 38), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
-	round(7, card)
-	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -70, 1, 0),
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -2, 0, 40), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(10, card); strokeit(COL.stroke, 1, card)
+	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -74, 1, 0),
 		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = label }, card)
-	local bg = mk("Frame", { BackgroundColor3 = S[key] and COL.accent or COL.stroke, Size = UDim2.fromOffset(42, 22),
-		Position = UDim2.new(1, -54, 0.5, -11), BorderSizePixel = 0 }, card); round(11, bg)
+	local bg = mk("Frame", { BackgroundColor3 = S[key] and COL.accent or COL.stroke, Size = UDim2.fromOffset(44, 22),
+		Position = UDim2.new(1, -58, 0.5, -11), BorderSizePixel = 0 }, card); round(11, bg)
+	local bgGlow = glow(bg, COL.accent, 1.6, S[key] and 0.2 or 1)
 	local knob = mk("Frame", { BackgroundColor3 = COL.text, Size = UDim2.fromOffset(18, 18),
-		Position = S[key] and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2), BorderSizePixel = 0 }, bg); round(9, knob)
+		Position = S[key] and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2), BorderSizePixel = 0 }, bg); round(9, knob)
 	local btn = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1) }, card)
 	btn.MouseButton1Click:Connect(function()
 		S[key] = not S[key]
-		TweenService:Create(knob, TweenInfo.new(0.15), { Position = S[key] and UDim2.fromOffset(22, 2) or UDim2.fromOffset(2, 2) }):Play()
+		TweenService:Create(knob, TweenInfo.new(0.15), { Position = S[key] and UDim2.fromOffset(24, 2) or UDim2.fromOffset(2, 2) }):Play()
 		TweenService:Create(bg, TweenInfo.new(0.15), { BackgroundColor3 = S[key] and COL.accent or COL.stroke }):Play()
+		bgGlow.Transparency = S[key] and 0.2 or 1
 		if onChange then onChange(S[key]) end
 	end)
 end
 
 local function settingButton(order, getLabel, onClick)
-	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 38), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
-	round(7, card)
-	local lbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -24, 1, 0),
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -2, 0, 40), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(10, card); strokeit(COL.stroke, 1, card)
+	local lbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -28, 1, 0),
 		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = getLabel() }, card)
 	local btn = mk("TextButton", { BackgroundTransparency = 1, Text = "", Size = UDim2.fromScale(1, 1) }, card)
+	card.MouseEnter:Connect(function() TweenService:Create(card, TweenInfo.new(0.12), { BackgroundColor3 = COL.cardH }):Play() end)
+	card.MouseLeave:Connect(function() TweenService:Create(card, TweenInfo.new(0.12), { BackgroundColor3 = COL.card }):Play() end)
 	btn.MouseButton1Click:Connect(function() onClick(); lbl.Text = getLabel() end)
 	return lbl
 end
 
 local function settingSlider(order, label, min, max, key, suffix)
-	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -4, 0, 50), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
-	round(7, card)
-	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 18),
+	local card = mk("Frame", { BackgroundColor3 = COL.card, Size = UDim2.new(1, -2, 0, 52), BorderSizePixel = 0, LayoutOrder = order }, pageSet)
+	round(10, card); strokeit(COL.stroke, 1, card)
+	mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 5), Size = UDim2.new(1, -28, 0, 18),
 		Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = COL.text, TextXAlignment = Enum.TextXAlignment.Left, Text = label }, card)
-	local valLbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 18),
+	local valLbl = mk("TextLabel", { BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 5), Size = UDim2.new(1, -28, 0, 18),
 		Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Right,
 		Text = (S[key] == 0 and "∞" or (S[key] .. (suffix or ""))) }, card)
-	local bar = mk("Frame", { BackgroundColor3 = COL.stroke, Position = UDim2.new(0, 12, 0, 34), Size = UDim2.new(1, -24, 0, 6), BorderSizePixel = 0 }, card); round(3, bar)
-	local fill = mk("Frame", { BackgroundColor3 = COL.accent, Size = UDim2.fromScale((S[key] - min) / (max - min), 1), BorderSizePixel = 0 }, bar); round(3, fill)
+	local bar = mk("Frame", { BackgroundColor3 = COL.stroke, Position = UDim2.new(0, 14, 0, 36), Size = UDim2.new(1, -28, 0, 6), BorderSizePixel = 0 }, card); round(3, bar)
+	local rel0 = (S[key] - min) / (max - min)
+	local fill = mk("Frame", { BackgroundColor3 = COL.accent, Size = UDim2.fromScale(rel0, 1), BorderSizePixel = 0 }, bar); round(3, fill)
+	gradient(fill, COL.accent, COL.accent2, 0)
+	local knob = mk("Frame", { BackgroundColor3 = COL.text, Size = UDim2.fromOffset(14, 14), AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(rel0, 0, 0.5, 0), BorderSizePixel = 0, ZIndex = 2 }, bar); round(7, knob); glow(knob, COL.accent, 1.4, 0.2)
 	local dragging = false
 	local function setX(x)
 		local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
 		local v = math.floor(min + (max - min) * rel + 0.5)
 		S[key] = v
 		fill.Size = UDim2.fromScale(rel, 1)
+		knob.Position = UDim2.new(rel, 0, 0.5, 0)
 		valLbl.Text = (v == 0 and "∞" or (v .. (suffix or "")))
 		reconcile()
 	end
@@ -816,31 +899,28 @@ local function settingSlider(order, label, min, max, key, suffix)
 	UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end end)
 end
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 0, Font = Enum.Font.GothamBold,
-	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "ESP" }, pageSet)
+sectionLabel(0, "ESP")
 settingToggle(1, "ESP enabled", "espEnabled", function() reconcile() end)
 settingToggle(2, "Show egg name", "showNames")
 settingToggle(3, "Show rarity / price / luck", "showStats")
 settingToggle(4, "Show distance", "showDistance")
 settingToggle(5, "Show marker dot", "showMarker", function() reconcile() end)
 settingToggle(6, "Hide other players' private eggs", "hidePrivate", function() reconcile() refreshLive() end)
-settingButton(7, function() return "Min rarity: " .. (RARITY_NAMES[S.minRarity] or "?") .. "  ▸" end, function()
+settingButton(7, function() return "Min rarity: " .. (RARITY_NAMES[S.minRarity] or "?") .. "   ▸" end, function()
 	S.minRarity = (S.minRarity % #RARITY_NAMES) + 1
 	reconcile()
 end)
 settingSlider(8, "Max ESP distance", 0, 5000, "maxDistance", "st")
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 9, Font = Enum.Font.GothamBold,
-	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "WARP" }, pageSet)
+sectionLabel(9, "Warp")
 settingSlider(10, "Warp height (studs above egg/home)", 0, 25, "warpHeight", "st")
 settingToggle(11, "Warp hotkey (G = nearest egg)", "warpHotkey")
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 20), LayoutOrder = 12, Font = Enum.Font.GothamBold,
-	TextSize = 13, TextColor3 = COL.accent, TextXAlignment = Enum.TextXAlignment.Left, Text = "HOME" }, pageSet)
+sectionLabel(12, "Home")
 settingToggle(13, "Auto-warp home while holding an egg", "autoHome")
 settingToggle(14, "Home hotkey (H = warp home)", "homeHotkey")
 
-mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -4, 0, 56), LayoutOrder = 15, Font = Enum.Font.Gotham,
+mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.new(1, -2, 0, 56), LayoutOrder = 15, Font = Enum.Font.Gotham,
 	TextSize = 11, TextColor3 = COL.sub, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "ESP is read-only. Warp/Home move your character locally (they do not fire remotes); the server may snap you back if it validates movement. 'Auto-warp home while holding an egg' teleports you to your plot the moment you pick an egg up. Use on a private/authorised server." }, pageSet)
 
@@ -866,9 +946,9 @@ end
 --=============================================================== minimise / close / keybind
 local pill = mk("TextButton", {
 	Text = "🥚 Eggs", Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = COL.text,
-	BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(88, 32), Position = UDim2.fromOffset(20, 120),
+	BackgroundColor3 = COL.accent, Size = UDim2.fromOffset(96, 36), Position = UDim2.fromOffset(20, 120),
 	Visible = false, BorderSizePixel = 0,
-}, gui); round(8, pill)
+}, gui); round(10, pill); gradient(pill, COL.accent, COL.accent2, 90); glow(pill, COL.accent, 1.4, 0.25)
 btnMin.MouseButton1Click:Connect(function() main.Visible = false; pill.Visible = true end)
 pill.MouseButton1Click:Connect(function() main.Visible = true; pill.Visible = false end)
 
@@ -948,9 +1028,7 @@ end)
 buildIndex()
 refreshLive()
 -- default tab
-tabButtons["Live Map"].BackgroundColor3 = COL.accent
-tabButtons["Live Map"].TextColor3 = COL.text
-pageLive.Visible = true
+selectTab("Live Map")
 
 print("[EggESP] Loaded. Eggs in DB: " .. (function() local n=0 for _ in pairs(EggData) do n+=1 end return n end)()
 	.. " | Toggle window with Right-Alt.")
